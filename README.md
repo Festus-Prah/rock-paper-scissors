@@ -82,4 +82,4 @@ Follow these steps to get the project running locally:
     *   You will automatically connect and wait for your opponent.
     *   Once your friend joins using the link, the game begins. Make your choices each round.
 
-## Project Structure 📁
+## Project Structure 📁"# rock-paper-scissors" 
