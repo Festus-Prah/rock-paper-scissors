@@ -1,0 +1,141 @@
+/* settings.css */
+.settings-panel {
+    display: none; /* Hidden by default */
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background-color: rgba(20, 20, 30, 0.95); /* Darker, less transparent */
+    color: #f0f0f0;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
+    z-index: 1000; /* Ensure it's above other content */
+    width: 280px; /* Slightly wider */
+    max-width: 90%;
+    animation: slideInRight 0.35s cubic-bezier(0.25, 0.8, 0.25, 1); /* Smoother animation */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.settings-panel h3 {
+    margin-top: 0;
+    margin-bottom: 18px;
+    text-align: center;
+    border-bottom: 1px solid #444;
+    padding-bottom: 12px;
+    font-size: 1.2em;
+    color: #fff;
+}
+
+.settings-section {
+    margin-bottom: 18px;
+}
+
+.settings-section h4 {
+    margin-bottom: 10px;
+    color: #aaa;
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.settings-section label {
+    display: flex; /* Use flex for alignment */
+    align-items: center;
+    margin-bottom: 10px;
+    cursor: pointer;
+    font-size: 0.95em;
+    color: #ddd;
+}
+
+.settings-section label input[type="checkbox"] {
+    margin-right: 8px;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--button-bg, #ff4500); /* Use theme color */
+}
+
+.settings-section label input[type="range"] {
+    flex-grow: 1; /* Take remaining space */
+    margin-left: 8px;
+    cursor: pointer;
+    height: 6px;
+    accent-color: var(--button-bg, #ff4500);
+}
+
+.settings-section select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--input-border, #555);
+    background-color: var(--input-bg, #333);
+    color: var(--input-color, #fff);
+    font-size: 0.95em;
+    cursor: pointer;
+    transition: background-color 0.3s, border-color 0.3s;
+}
+.settings-section select:focus {
+    outline: none;
+    border-color: var(--button-bg, #ff4500);
+    box-shadow: 0 0 5px var(--button-bg, #ff4500);
+}
+
+.settings-section.online-section {
+    border-top: 1px solid #444;
+    padding-top: 15px;
+    margin-top: 15px;
+    /* Initially hidden by JS if mode is not online */
+    /* display: none; */
+}
+
+.settings-section button {
+    width: 100%; /* Make buttons full width within section */
+    padding: 9px 12px;
+    font-size: 0.95em;
+    background: var(--button-bg, #007bff);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.3s, opacity 0.3s;
+    margin-top: 8px;
+}
+.settings-section button:hover {
+    background: var(--button-hover-bg, #0056b3);
+    opacity: 0.95;
+}
+.settings-section button:disabled {
+    background-color: #555;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+
+.settings-section input[type="text"] {
+    width: 100%; /* Full width now */
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--input-border, #555);
+    background-color: var(--input-bg, #555);
+    color: var(--input-color, #eee);
+    font-size: 0.9em;
+    margin-top: 8px; /* Space from generate button */
+    margin-bottom: 5px; /* Space before copy button */
+    box-sizing: border-box; /* Include padding in width */
+}
+.settings-section input[type="text"]:read-only {
+    background-color: #444;
+}
+
+/* Specific styling for copy button */
+#copy-link-button {
+     background-color: #5a5a5a; /* Different color for utility */
+     margin-top: 5px;
+}
+#copy-link-button:hover {
+     background-color: #777;
+}

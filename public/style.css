@@ -1,0 +1,279 @@
+/* style.css */
+
+/* Define root variables (defaults, overridden by themes.js) */
+:root {
+    --bg-gradient-start: #1e90ff;
+    --bg-gradient-end: #32cd32;
+    --text-color: #ffffff;
+    --container-bg: rgba(255, 255, 255, 0.1);
+    --button-bg: #ff4500;
+    --button-hover-bg: #ff6347;
+    --choice-bg: #ffffff;
+    --choice-color: #333333;
+    --choice-shadow: rgba(255, 255, 255, 0.5);
+    --score-color: #ffffff;
+    --result-color: #ffffff;
+    --link-color: #f0f0ff; /* Added for links */
+    --input-bg: #555555;
+    --input-color: #eeeeee;
+    --input-border: #666666;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Modern font stack */
+}
+
+html {
+    font-size: 16px; /* Base font size */
+}
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, var(--bg-gradient-start), var(--bg-gradient-end));
+    color: var(--text-color);
+    text-align: center;
+    padding: 1rem; /* Use rem for padding */
+    transition: background 0.5s ease-in-out, color 0.5s ease-in-out;
+    animation: fadeIn 1s ease-in;
+    overflow-x: hidden; /* Prevent horizontal scroll */
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.container {
+    background: var(--container-bg);
+    padding: clamp(1rem, 5vw, 2rem); /* Responsive padding */
+    border-radius: 15px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    width: 90%;
+    max-width: 600px;
+    animation: slideUp 0.5s ease-out;
+    transition: background 0.5s ease-in-out;
+    position: relative; /* Needed for absolute positioning of settings button */
+}
+
+@keyframes slideUp {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+h1 {
+    font-size: clamp(1.8rem, 5vw, 2.8rem);
+    margin-bottom: 0.8rem;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    color: var(--text-color);
+}
+
+p#welcome {
+    font-size: clamp(1rem, 3vw, 1.2rem);
+    margin-bottom: 1.5rem;
+    opacity: 0.9;
+    color: var(--text-color);
+}
+
+#settings-button { /* Style the cog button */
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: rgba(0, 0, 0, 0.3);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 1.5rem;
+    cursor: pointer;
+    z-index: 1001;
+    transition: background 0.3s, transform 0.3s ease-out;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0; /* Remove default button padding */
+}
+
+#settings-button:hover {
+    background: rgba(0, 0, 0, 0.5);
+    transform: rotate(45deg);
+}
+
+
+#reset-button {
+    padding: 0.6rem 1.2rem;
+    font-size: clamp(0.9rem, 2.5vw, 1rem);
+    background: var(--button-bg);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s, transform 0.2s;
+    margin-top: 1.5rem; /* More space */
+    display: inline-block;
+}
+
+#reset-button:hover {
+    background: var(--button-hover-bg);
+    transform: scale(1.05);
+}
+#reset-button:active {
+    transform: scale(0.98);
+}
+
+
+.choices {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: clamp(1rem, 4vw, 1.5rem); /* Responsive gap */
+    margin: 1.5rem 0;
+}
+
+.choice {
+    background: var(--choice-bg);
+    color: var(--choice-color);
+    border-radius: 50%;
+    width: clamp(65px, 16vw, 85px); /* Slightly larger */
+    height: clamp(65px, 16vw, 85px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(2rem, 6vw, 2.5rem); /* Larger emojis */
+    cursor: pointer;
+    transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, background 0.5s, color 0.5s;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+    user-select: none; /* Prevent text selection */
+}
+.choice:hover {
+    transform: translateY(-5px) scale(1.08); /* Lift effect */
+    box-shadow: 0 0 18px var(--choice-shadow);
+}
+.choice:active {
+    transform: translateY(0px) scale(1.02); /* Press down effect */
+     box-shadow: 0 0 10px var(--choice-shadow);
+}
+
+.choice.selected { /* Visual feedback during processing */
+    transform: scale(0.95);
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.3);
+    opacity: 0.8;
+}
+
+.player-choices {
+    display: flex;
+    justify-content: space-around; /* Space them out more */
+    align-items: center;
+    gap: 1rem;
+    margin: 1.5rem 0;
+    min-height: clamp(70px, 17vw, 90px); /* Ensure space */
+}
+
+.choice-display {
+    background: var(--choice-bg);
+    color: var(--choice-color);
+    padding: 0.5rem;
+    border-radius: 50%;
+    width: clamp(65px, 16vw, 85px); /* Match choice size */
+    height: clamp(65px, 16vw, 85px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(2rem, 6vw, 2.5rem);
+    transition: transform 0.3s ease-out, opacity 0.3s ease-out, background 0.5s, color 0.5s;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+.choice-display.winner {
+    animation: pulse 1.2s infinite ease-in-out;
+    box-shadow: 0 0 20px gold, 0 0 10px var(--choice-shadow); /* Enhance winner glow */
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.12); }
+    100% { transform: scale(1); }
+}
+
+.score {
+    margin: 1.2rem 0;
+    font-size: clamp(1.1rem, 3.5vw, 1.4rem);
+    font-weight: bold;
+    color: var(--score-color);
+    transition: color 0.5s;
+}
+
+#result {
+    font-size: clamp(1.1rem, 3.5vw, 1.5rem);
+    margin: 1.5rem 0;
+    min-height: 50px;
+    font-weight: 500;
+    opacity: 0.95;
+    color: var(--result-color);
+    transition: color 0.5s;
+    display: flex; /* Center text vertically */
+    align-items: center;
+    justify-content: center;
+}
+
+#choices.disabled {
+    pointer-events: none;
+    opacity: 0.6;
+    transition: opacity 0.3s ease-in-out;
+}
+#choices.disabled .choice:hover {
+     transform: none; /* Disable hover effect when disabled */
+     box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+}
+
+a { /* Basic link styling */
+    color: var(--link-color);
+    text-decoration: none;
+    transition: color 0.3s;
+}
+a:hover {
+    text-decoration: underline;
+    color: white;
+}
+
+
+/* Responsive Adjustments */
+@media (max-width: 480px) {
+    .container {
+        padding: 1rem;
+        width: 95%;
+    }
+    #settings-button {
+        top: 10px;
+        right: 10px;
+        width: 35px;
+        height: 35px;
+        font-size: 1.3rem;
+    }
+    h1 {
+        font-size: 1.6rem;
+    }
+    .choices {
+         gap: 0.8rem;
+    }
+    .choice, .choice-display {
+        width: 60px;
+        height: 60px;
+        font-size: 1.8rem;
+    }
+     .player-choices {
+         min-height: 65px;
+     }
+    #reset-button {
+        width: 80%;
+        padding: 0.5rem 1rem;
+        margin: 1rem auto;
+        display: block;
+    }
+}

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Play Rock, Paper, Scissors online with friends or against the computer.">
+    <meta name="keywords" content="rock paper scissors, online game, multiplayer game, rps">
+    <title>Rock, Paper, Scissors - Play Online</title>
+    <!-- CORRECTED PATHS -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="icon" href="rps.jpg" type="image/x-icon">
+</head>
+<body>
+    <!-- CORRECTED PATH (Also consider renaming the MP3 file) -->
+    <audio id="background-sound" src="Kendrick Lamar - Not Like Us (INSTRUMENTAL) Drake Diss.mp3" loop></audio>
+    <!-- Optional Game Sounds -->
+    <!-- <audio id="choose-sound" src="/sounds/choose.wav"></audio> -->
+    <!-- <audio id="win-sound" src="/sounds/win.wav"></audio> -->
+
+    <!-- Settings Panel -->
+    <div class="settings-panel" id="settings-panel">
+        <h3>Settings</h3>
+        <div class="settings-section">
+            <h4>Sound</h4>
+            <label><input type="checkbox" id="sound-toggle" checked> Music On/Off</label>
+            <label>Volume: <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.5"></label> <!-- Default volume lowered -->
+        </div>
+        <div class="settings-section">
+            <h4>Theme</h4>
+            <select id="theme-select">
+                <option value="default">Default</option>
+                <option value="dark">Dark</option>
+                <option value="neon">Neon</option>
+                <option value="retro">Retro</option>
+                <option value="nature">Nature</option>
+                <option value="cosmic">Cosmic</option>
+                <option value="cyberpunk">Cyberpunk</option>
+                <option value="fantasy">Fantasy</option>
+            </select>
+        </div>
+        <div class="settings-section">
+            <h4>Game Mode</h4>
+            <select id="mode-select">
+                <option value="computer">vs Computer</option>
+                <option value="friend">vs Friend (Local)</option>
+                <option value="online">Online</option>
+            </select>
+        </div>
+        <!-- Online Play section - initially hidden if mode is not online -->
+        <div class="settings-section online-section">
+            <h4>Online Play</h4>
+            <button id="generate-link-button">Create Game Link</button>
+            <input type="text" id="online-link" readonly placeholder="Your game link">
+            <button id="copy-link-button">Copy</button>
+        </div>
+    </div>
+
+    <!-- Main Game Container -->
+    <div class="container">
+        <h1>Rock, Paper, Scissors ✂️</h1>
+        <p id="welcome">Welcome, <span id="username">Guest</span>!</p>
+
+        <!-- Settings Button -->
+        <button id="settings-button" aria-label="Open Settings">⚙️</button>
+
+        <div class="score">
+            You: <span id="player1-score">0</span> |
+            <span id="opponent-label">Computer</span>: <span id="player2-score">0</span>
+        </div>
+
+        <div class="choices" id="choices">
+            <div class="choice" data-choice="rock" aria-label="Choose Rock">🧱</div>
+            <div class="choice" data-choice="paper" aria-label="Choose Paper">🧻</div>
+            <div class="choice" data-choice="scissors" aria-label="Choose Scissors">✂️</div>
+        </div>
+
+        <div class="player-choices">
+            <div id="player1-choice" class="choice-display" aria-live="polite">?</div>
+            <div id="player2-choice" class="choice-display" aria-live="polite">?</div>
+        </div>
+
+        <div id="result" aria-live="polite">Select your mode and make a choice!</div>
+
+        <button id="reset-button">Reset Score</button>
+    </div>
+
+    <!-- Scripts: Load theme logic first, then game logic, then settings interaction -->
+    <!-- CORRECTED PATHS -->
+    <script src="themes.js"></script>
+    <script src="game.js"></script>
+    <script src="settings.js"></script>
+</body>
+</html>
