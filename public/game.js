@@ -45,7 +45,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Fetch username from server API
     fetch('/api/username')
-        .then(response => response.ok ? response.json() : Promise.reject(`HTTP error! status: ${response.status}`))
+        .then(response => {
+            if (!response.ok) { // Check for non-2xx status codes
+                return response.text().then(text => Promise.reject(`HTTP error ${response.status}: ${text}`));
+            }
+            return response.json();
+        })
         .then(data => {
             playerUsername = data.username || 'Guest';
             usernameSpan.textContent = playerUsername;
@@ -58,7 +63,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Determine initial mode (URL > localStorage > default)
     const pathParts = window.location.pathname.split('/');
-    const gameIdFromUrl = (pathParts.length === 3 && pathParts[1] === 'game') ? pathParts[2] : null;
+    // Expecting /game/<gameId>
+    const gameIdFromUrl = (pathParts.length === 3 && pathParts[1] === 'game' && /^[a-f0-9]{8}$/i.test(pathParts[2]))
+                          ? pathParts[2]
+                          : null;
 
     let initialMode = 'computer'; // Default
     try {
@@ -71,11 +79,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (gameIdFromUrl) {
         initialMode = 'online'; // Prioritize joining via URL
         console.log(`Found game ID in URL: ${gameIdFromUrl}. Setting mode to online.`);
-        // Connection attempt will be triggered by setGameMode if needed, or called directly below
+        // Connection attempt will be triggered by setGameMode or called below
     }
 
     // Apply the determined mode (this also updates UI and saves preference)
-    // Note: setGameMode is defined below, this works due to function hoisting
+    // Ensure setGameMode is defined globally or hoisted correctly
     setGameMode(initialMode);
 
     // If joining via URL, attempt connection immediately *after* setting mode
@@ -104,7 +112,10 @@ function makeChoice(choice) {
     const choiceEl = document.querySelector(`.choice[data-choice="${choice}"]`);
     if (choiceEl) {
         choiceEl.classList.add('selected');
-        setTimeout(() => choiceEl.classList.remove('selected'), 300);
+        // Remove the class slightly later to ensure visibility
+        setTimeout(() => {
+            if (choiceEl) choiceEl.classList.remove('selected');
+         }, 350); // Slightly longer than animation time
     }
 
     // Delegate based on mode
@@ -160,23 +171,34 @@ function playOnline(choice) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
         resultDiv.textContent = 'Not connected to online game. Create/Join a game first.';
         console.warn("Attempted to play online without open WebSocket. State:", ws ? ws.readyState : 'null');
+        setGameActive(true); // Re-enable if not connected
         return;
     }
     if (!currentOnlineGameId) {
          resultDiv.textContent = 'Error: No active game ID found.';
          console.error("No currentOnlineGameId set for playOnline");
+         setGameActive(true); // Re-enable on error
          return;
     }
 
     console.log(`Sending choice: ${choice} for game: ${currentOnlineGameId}`);
     setGameActive(false); // Disable choices until result comes back
-    ws.send(JSON.stringify({ choice: choice })); // Server knows gameId from ws context
-    resultDiv.textContent = 'Choice sent. Waiting for opponent...';
-    p1ChoiceDiv.textContent = optionsDisplay[choice]; // Show own choice immediately
-    p2ChoiceDiv.textContent = '⏳'; // Indicate waiting
+    try {
+        ws.send(JSON.stringify({ choice: choice })); // Server knows gameId from ws context
+        resultDiv.textContent = 'Choice sent. Waiting for opponent...';
+        p1ChoiceDiv.textContent = optionsDisplay[choice]; // Show own choice immediately
+        p2ChoiceDiv.textContent = '⏳'; // Indicate waiting
+    } catch (error) {
+        console.error("Error sending choice via WebSocket:", error);
+        resultDiv.textContent = 'Error sending choice. Connection issue?';
+        setGameActive(true); // Re-enable on send error
+    }
 }
 
 function displayChoicesWithAnimation(p1Choice, p2Choice, callback) {
+    // Ensure elements exist
+    if (!p1ChoiceDiv || !p2ChoiceDiv) return;
+
     // Start fade out immediately
     p1ChoiceDiv.style.opacity = '0';
     p1ChoiceDiv.style.transform = 'scale(0.8)';
@@ -205,6 +227,9 @@ function displayChoicesWithAnimation(p1Choice, p2Choice, callback) {
 
 
 function determineWinner(myChoice, opponentChoice) {
+     // Ensure elements exist
+     if (!resultDiv || !player1ScoreSpan || !player2ScoreSpan || !p1ChoiceDiv || !p2ChoiceDiv || !opponentLabel) return;
+
     let resultText = '';
     let iWin = false;
     let opponentWins = false;
@@ -216,8 +241,7 @@ function determineWinner(myChoice, opponentChoice) {
 
 
     if (!myChoice || !opponentChoice) {
-        console.warn("Cannot determine winner, choices missing.");
-        // This case shouldn't happen if logic is correct, but good to handle
+        console.warn("Cannot determine winner, choices missing:", myChoice, opponentChoice);
         resultDiv.textContent = "Error determining result.";
          setGameActive(true); // Re-enable game if determination fails
         return;
@@ -247,14 +271,13 @@ function determineWinner(myChoice, opponentChoice) {
     p1ChoiceDiv.classList.toggle('winner', iWin);
     p2ChoiceDiv.classList.toggle('winner', opponentWins);
 
-    // Re-enable game for next round (if not online, as online waits for message)
-    // Online mode re-enabling is handled in ws.onmessage after result display timeout
-     if (mode !== 'online') {
-         // Already handled in playAgainstComputer/Friend timeouts
-     }
+    // Re-enabling game for next round is handled by callers (playAgainstComputer/Friend timeouts or WS message handler)
 }
 
 function resetGame() {
+     // Ensure elements exist
+     if (!player1ScoreSpan || !player2ScoreSpan || !resultDiv || !p1ChoiceDiv || !p2ChoiceDiv) return;
+
     player1Score = 0;
     player2Score = 0;
     player1ChoiceLocal = null; // Reset local friend mode choice
@@ -269,6 +292,9 @@ function resetGame() {
 
 // Resets the choice display divs to '?'
 function resetChoiceDisplay() {
+     // Ensure elements exist
+     if (!p1ChoiceDiv || !p2ChoiceDiv) return;
+
     p1ChoiceDiv.classList.remove('winner');
     p2ChoiceDiv.classList.remove('winner');
     // Only reset to '?' if not actively waiting for an online opponent's choice
@@ -288,6 +314,8 @@ function resetChoiceDisplay() {
 
 
 function setGameActive(isActive) {
+     // Ensure element exists
+     if (!choicesDiv) return;
     gameActive = isActive;
     choicesDiv.classList.toggle('disabled', !isActive);
 }
@@ -306,28 +334,30 @@ function updateOpponentLabel() {
 // --- WebSocket Functions (for Online Mode) ---
 
 function connectWebSocket(gameId) {
+     // Ensure element exists
+     if (!resultDiv) return;
+
     if (!gameId) {
         console.error("connectWebSocket called without gameId.");
         resultDiv.textContent = "Invalid game ID.";
         return;
     }
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        if (currentOnlineGameId === gameId) {
-            console.log(`Already connected to WebSocket for game: ${gameId}`);
-            resultDiv.textContent = 'Already connected. Waiting for opponent...';
-            return; // Already connected to the correct game
-        } else {
-            console.log(`Closing connection to old game: ${currentOnlineGameId} to connect to ${gameId}`);
-            ws.close(1000, "Connecting to a different game"); // Close previous connection first
-            // Set ws to null immediately so the onclose handler knows not to display generic messages
-            ws = null;
-        }
+    // Close existing connection if connecting to a different game or if it's not open/connecting
+    if (ws && (currentOnlineGameId !== gameId || (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING))) {
+        console.log(`Closing old WebSocket connection (State: ${ws.readyState}, Current Game: ${currentOnlineGameId}, Target Game: ${gameId})`);
+        ws.close(1000, currentOnlineGameId !== gameId ? "Connecting to a different game" : "Reconnecting");
+        ws = null; // Ensure ws is nullified immediately
+    } else if (ws && ws.readyState === WebSocket.OPEN && currentOnlineGameId === gameId) {
+        console.log(`Already connected to WebSocket for game: ${gameId}`);
+        resultDiv.textContent = 'Already connected. Waiting for opponent...';
+        return; // Already correctly connected
     } else if (ws && ws.readyState === WebSocket.CONNECTING) {
-        console.log("WebSocket is already attempting to connect.");
-        return;
+        console.log("WebSocket is already attempting to connect. Please wait.");
+        return; // Don't create a new one while connecting
     }
 
+    // Proceed with new connection
     currentOnlineGameId = gameId; // Set the active game ID *before* connecting
     console.log(`Attempting to connect WebSocket for game: ${gameId}`);
     resultDiv.textContent = `Connecting to game ${gameId}...`;
@@ -335,7 +365,7 @@ function connectWebSocket(gameId) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     // Use location.host which includes port if non-standard
-    const wsUrl = `${protocol}://${window.location.host}/ws/${gameId}`;
+    const wsUrl = `${protocol}://${window.location.host}/ws/${gameId}`; // Path matches server setup
 
     try {
         ws = new WebSocket(wsUrl);
@@ -343,7 +373,8 @@ function connectWebSocket(gameId) {
         ws.onopen = () => {
             console.log(`WebSocket connected to ${wsUrl}`);
             resultDiv.textContent = 'Connected! Waiting for opponent...';
-            setGameActive(true); // Enable choices now that we are connected
+            // Game activity might be set by messages received (e.g., player count)
+            // setGameActive(true); // Enable choices now that we are connected - let server confirm
         };
 
         ws.onmessage = (event) => {
@@ -354,8 +385,8 @@ function connectWebSocket(gameId) {
                 if (data.error) {
                     console.error('WebSocket error message:', data.error);
                     resultDiv.textContent = `Error: ${data.error}`;
-                    setGameActive(true); // Re-enable choices on error
-                    if (data.error.includes("full") || data.error.includes("not found")) {
+                    setGameActive(true); // Re-enable choices on error? Maybe not always safe.
+                    if (data.error.includes("full") || data.error.includes("not found") || data.error.includes("ended")) {
                         ws.close(1000, "Game error received");
                         currentOnlineGameId = null; // Clear game ID on fatal error
                     }
@@ -372,20 +403,26 @@ function connectWebSocket(gameId) {
                     }
                 } else if (data.yourChoice && data.opponentChoice) {
                     // Received results from server for the round
-                    console.log(`My choice: ${data.yourChoice}, Opponent's: ${data.opponentChoice}`);
+                    console.log(`Received results - My choice: ${data.yourChoice}, Opponent's: ${data.opponentChoice}`);
                     // Display choices first, then determine winner which handles UI update delays
                     displayChoicesWithAnimation(data.yourChoice, data.opponentChoice, () => {
                         determineWinner(data.yourChoice, data.opponentChoice);
                         // Re-enable game *after* result is shown and animation potentially finished
                         setTimeout(() => {
-                            setGameActive(true);
                              resultDiv.textContent = "Round finished! Make your next choice.";
                              resetChoiceDisplay(); // Prepare for next round visually
+                             setGameActive(true); // Re-enable for next round
                          }, 1500);
                      });
                     player1ChoiceLocal = null; // Clear local state if any
                 } else if (data.message) { // General status messages
                      resultDiv.textContent = data.message;
+
+                     // Notify user if the opponent has made their first move
+                     if (data.message.toLowerCase().includes("opponent has made their first move")) {
+                         console.log("Opponent has made their first move.");
+                     }
+
                      // Check if message implies choices should be active
                      if (data.message.toLowerCase().includes("make your choice")) {
                           setGameActive(true);
@@ -404,6 +441,7 @@ function connectWebSocket(gameId) {
         };
 
         ws.onerror = (error) => {
+            // Log the error object itself for more details if available
             console.error('WebSocket error event:', error);
             resultDiv.textContent = 'Connection error. Please refresh or try joining again.';
             setGameActive(true); // Re-enable choices
@@ -412,29 +450,32 @@ function connectWebSocket(gameId) {
         };
 
         ws.onclose = (event) => {
-            const reason = event.reason || 'No reason specified';
+            // Use event.reason, converting Buffer to string if necessary
+            const reason = event.reason instanceof Buffer ? event.reason.toString() : (event.reason || 'No reason specified');
             console.log(`WebSocket disconnected. Code: ${event.code}, Reason: ${reason}`);
 
-            // Avoid showing "Disconnected" if closed intentionally (e.g., mode change)
-             if (ws === null && reason === "Connecting to a different game") {
-                  // This was an intentional close to reconnect, do nothing here.
-                  return;
-             }
-             if (event.code !== 1000 && event.code !== 1005 /* No Status Received */ ) {
-                resultDiv.textContent = `Connection lost (Code: ${event.code}). Please refresh or rejoin.`;
+             // Only show generic disconnection messages if it wasn't an intentional close or known error
+             if (event.code !== 1000 /* Normal Closure */ &&
+                 event.code !== 1012 /* Service Restart */ &&
+                 reason !== "Connecting to a different game" &&
+                 reason !== "User changed game mode" &&
+                 reason !== "Game error received")
+             {
+                 resultDiv.textContent = `Connection lost (Code: ${event.code}). Please refresh or rejoin.`;
              } else if (reason && reason !== "User changed game mode" && !reason.includes("Game error received")){
-                 // Show reason if it's not a user action or known error closure
+                 // Show specific reason if provided and not handled above
                  resultDiv.textContent = `Disconnected: ${reason}`;
-             } else if (mode === 'online' && !reason.includes("User changed game mode")) {
-                  // If still in online mode and not intentionally closed by user changing mode
+             } else if (mode === 'online' && reason !== "User changed game mode" && ws) {
+                  // If still in online mode and not intentionally closed, show generic disconnected
+                  // Check 'ws' to ensure this isn't firing after intentional nullification
                   resultDiv.textContent = 'Disconnected from game.';
              }
 
             setGameActive(true); // Ensure game is playable in other modes
             ws = null; // Clear the ws variable
             currentOnlineGameId = null;
-            // Only reset score if the disconnection wasn't part of switching modes
-            if (!reason || !reason.includes("User changed game mode")) {
+            // Reset score etc. only if disconnection wasn't planned (like changing mode)
+            if (reason !== "Connecting to a different game" && reason !== "User changed game mode") {
                  resetGame(); // Reset scores etc. if connection dropped unexpectedly
                  updateOpponentLabel(); // Ensure label is correct
              }
@@ -451,17 +492,18 @@ function connectWebSocket(gameId) {
 
 // --- Functions accessible by settings.js ---
 
+// Exposed globally for settings.js to call
 function setGameMode(newMode) {
     if (!['computer', 'friend', 'online'].includes(newMode)) {
         console.error("Invalid mode selected:", newMode);
         return;
     }
 
-    // Only close WS if currently in online mode and switching away
+    // Close WS only if currently connected in online mode and switching away
     if (mode === 'online' && newMode !== 'online' && ws && ws.readyState === WebSocket.OPEN) {
         console.log("Closing WebSocket connection due to mode change from Online.");
         ws.close(1000, "User changed game mode"); // Normal closure with reason
-        ws = null;
+        ws = null; // Nullify immediately
         currentOnlineGameId = null;
     }
 
@@ -476,7 +518,13 @@ function setGameMode(newMode) {
     updateOpponentLabel();
     resetGame(); // Reset scores and UI text for the new mode
     setGameActive(true); // Ensure game is active for the new mode
-    resultDiv.textContent = 'Make your choice!';
+    // Set appropriate initial message based on mode
+    if (mode === 'online') {
+         resultDiv.textContent = 'Select "Create Game Link" or join via a link!';
+         setGameActive(false); // Don't allow choices until connected/game starts
+    } else {
+        resultDiv.textContent = 'Make your choice!';
+    }
     console.log("Game mode set to:", mode);
 
     // Update visibility of online section in settings panel
@@ -484,19 +532,16 @@ function setGameMode(newMode) {
     if (onlineSection) {
         onlineSection.style.display = newMode === 'online' ? 'block' : 'none';
     }
-
-    // If switching TO online mode, but not via URL, maybe prompt user?
-    // For now, user needs to explicitly click "Create Game Link"
 }
 
-// Function for settings.js to call after creating a game
+// Exposed globally for settings.js to call after creating a game
 function handleGameCreated(gameId, link) {
     if (mode !== 'online') {
         console.warn("handleGameCreated called but mode is not online. Switching.");
         setGameMode('online'); // Ensure mode is online
     }
     currentOnlineGameId = gameId;
-    // Update the input field in settings (handled by settings.js itself now)
-    // Automatically connect the creator
+    // settings.js handles updating the input field
+    // Automatically connect the creator to the WebSocket
     connectWebSocket(gameId);
 }

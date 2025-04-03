@@ -1,31 +1,51 @@
+// rock-paper-scissors-project/server/server.js
+
 const express = require('express');
 const path = require('path');
+const fs = require('fs'); // Import File System module to check directory existence
 const { v4: uuidv4 } = require('uuid');
 const WebSocket = require('ws');
 const http = require('http'); // Use http module for explicit server creation
 
-// Import database connection from database.js
+// Import database connection from database.js (ensure it's in the same 'server' directory)
 const db = require('./database');
 
 const app = express();
+// Use PORT from environment variable (for hosting platforms like Fly.io, Render) or default to 3000
 const port = process.env.PORT || 3000;
 
 // --- Middleware ---
 app.use(express.json()); // Parse JSON bodies
 
+// --- Static File Serving Setup ---
+
 // Define the absolute path to the public directory explicitly
+// __dirname points to the 'server' directory where this script lives.
+// '../public' goes up one level from 'server' and then into 'public'.
 const publicDirectoryPath = path.join(__dirname, '../public');
-console.log(`[Server] Serving static files from: ${publicDirectoryPath}`); // Add log to verify path
 
-// Serve static files - THIS MUST BE CORRECT and MUST be before specific routes
+// **Crucial Debugging Check:** Verify the public directory actually exists
+if (!fs.existsSync(publicDirectoryPath)) {
+    console.error(`[Server Error] FATAL: Public directory not found at expected path: ${publicDirectoryPath}`);
+    console.error(`[Server Error] Please ensure the 'public' folder exists adjacent to the 'server' folder.`);
+    process.exit(1); // Exit if the public directory is missing
+} else {
+    console.log(`[Server] Found public directory at: ${publicDirectoryPath}`);
+}
+
+// Serve static files from the 'public' directory
+// This MUST come before the routes that handle specific paths like '/', '/game/:id', etc.
 app.use(express.static(publicDirectoryPath));
+console.log(`[Server] Static file serving configured for path: ${publicDirectoryPath}`);
 
-// Middleware to track visitors and assign usernames
+// --- Visitor Tracking Middleware ---
 app.use((req, res, next) => {
-    // Attempt to get IP address reliably
-    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+    // Attempt to get IP address reliably (consider Vercel/Fly.io headers)
+    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() ||
+               req.headers['fly-client-ip']?.split(',')[0].trim() || // For Fly.io
+               req.socket.remoteAddress;
     if (!ip) {
-        console.warn("Could not determine visitor IP address.");
+        console.warn("[Visitor] Could not determine visitor IP address.");
         res.locals.username = 'Guest_NoIP'; // Assign a fallback username
         return next(); // Continue without DB interaction if IP is missing
     }
@@ -34,8 +54,9 @@ app.use((req, res, next) => {
     // Determine gameId if accessing a specific game URL
     const pathSegments = req.path.split('/');
     let gameId = null;
+    // Check for /game/<8-hex-chars> format specifically
     if (pathSegments.length === 3 && pathSegments[1] === 'game') {
-        if (/^[a-f0-9]{8}$/i.test(pathSegments[2]) && !pathSegments[2].includes('.')) {
+        if (/^[a-f0-9]{8}$/i.test(pathSegments[2])) {
              gameId = pathSegments[2];
         }
     }
@@ -53,39 +74,45 @@ app.use((req, res, next) => {
             db.run('INSERT INTO users (ip, username, visit_time, game_id) VALUES (?, ?, ?, ?)',
                 [ip, username, visitTime, gameId], (insertErr) => {
                     if (insertErr) {
-                        // Handle potential UNIQUE constraint violation gracefully (e.g., if IP reused quickly)
-                        if (insertErr.code === 'SQLITE_CONSTRAINT' && insertErr.message.includes('UNIQUE constraint failed: users.ip')) {
-                             console.warn(`[DB Warn] Race condition or reused IP for insert: ${ip}. Attempting update.`);
-                             db.run('UPDATE users SET visit_time = ?, game_id = ? WHERE ip = ?',
-                                 [visitTime, gameId, ip], (updateErr) => {
-                                     if (updateErr) console.error(`[DB Error] User update error after insert fail for IP ${ip}:`, updateErr.message);
-                                     db.get('SELECT username FROM users WHERE ip = ?', [ip], (fetchErr, existingRow) => {
-                                         res.locals.username = existingRow ? existingRow.username : username;
-                                         next();
+                        // Handle potential UNIQUE constraint violation gracefully
+                        if (insertErr.code === 'SQLITE_CONSTRAINT') {
+                            if (insertErr.message.includes('users.ip')) {
+                                 console.warn(`[DB Warn] Race condition or reused IP for insert: ${ip}. Updating visit time.`);
+                                 db.run('UPDATE users SET visit_time = ?, game_id = ? WHERE ip = ?',
+                                     [visitTime, gameId, ip], (updateErr) => {
+                                         if (updateErr) console.error(`[DB Error] User update error after insert fail for IP ${ip}:`, updateErr.message);
+                                         // Fetch username again after potential update
+                                         db.get('SELECT username FROM users WHERE ip = ?', [ip], (fetchErr, existingRow) => {
+                                             res.locals.username = existingRow ? existingRow.username : username; // Use existing if found
+                                             next();
+                                         });
                                      });
-                                     return;
-                                 });
-                        } else if (insertErr.code === 'SQLITE_CONSTRAINT' && insertErr.message.includes('UNIQUE constraint failed: users.username')) {
-                            console.warn(`[DB Warn] Generated username collision for: ${username}. Regenerating.`);
-                            const newUsername = generateUsername(ip);
-                            db.run('INSERT INTO users (ip, username, visit_time, game_id) VALUES (?, ?, ?, ?)',
-                                [ip, newUsername, visitTime, gameId], (retryErr) => {
-                                     if (retryErr) console.error(`[DB Error] User insert error after username collision retry for IP ${ip}:`, retryErr.message);
-                                });
-                             res.locals.username = newUsername;
-                             next();
-                             return;
+                            } else if (insertErr.message.includes('users.username')) {
+                                console.warn(`[DB Warn] Generated username collision for: ${username}. Regenerating.`);
+                                const newUsername = generateUsername(ip); // Try a new one
+                                db.run('INSERT INTO users (ip, username, visit_time, game_id) VALUES (?, ?, ?, ?)',
+                                    [ip, newUsername, visitTime, gameId], (retryErr) => {
+                                         if (retryErr) console.error(`[DB Error] User insert error after username collision retry for IP ${ip}:`, retryErr.message);
+                                    });
+                                 res.locals.username = newUsername; // Assign the new username
+                                 next();
+                            } else {
+                                 // Other constraint error
+                                 console.error(`[DB Error] User insert constraint error for IP ${ip}:`, insertErr.message);
+                                 res.locals.username = username; // Still assign the initially generated one
+                                 next();
+                            }
                         } else {
+                             // Non-constraint insert error
                              console.error(`[DB Error] User insert error for IP ${ip}:`, insertErr.message);
                              res.locals.username = username;
                              next();
-                             return;
                         }
                     } else {
+                        // Successful insert
                         console.log(`[Visitor] New: ${username} (IP: ${ip})`);
                         res.locals.username = username;
                         next();
-                        return;
                     }
                 });
         } else {
@@ -96,24 +123,27 @@ app.use((req, res, next) => {
                         console.error(`[DB Error] User update error for IP ${ip}:`, updateErr.message);
                     }
                 });
+            // Use the existing username from the DB
             res.locals.username = row.username;
             next();
         }
     });
 });
 
-// Helper function to generate a username (simple version)
+// Helper function to generate a username (more unique version)
 function generateUsername(ip) {
-    const ipHash = ip.split('.').reduce((acc, part, index) => acc + (parseInt(part, 10) * (index + 1)), 0) % 1000;
-    const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
-    return `User${ipHash}${randomStr}`;
+    // Simple hash based on IP parts (works for IPv4 and basic IPv6)
+    const ipHash = ip.split(/[:.]+/).reduce((acc, part) => acc + (parseInt(part, 16) || parseInt(part, 10) || 0), 0) % 10000;
+    // Slightly longer random string
+    const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
+    return `User_${ipHash}_${randomStr}`;
 }
 
-// --- HTTP Routes ---
+// --- HTTP API Routes ---
 
-// Simple API to get the current user's assigned username
-// Place specific API routes before more general ones
+// API to get the current user's assigned username
 app.get('/api/username', (req, res) => {
+    // Use username set by middleware, default to 'Guest' if somehow missing
     res.json({ username: res.locals.username || 'Guest' });
 });
 
@@ -130,38 +160,50 @@ app.get('/api/visitors', (req, res) => {
 
 // API to create a new online game
 app.post('/api/create-game', (req, res) => {
-    const gameId = uuidv4().substring(0, 8);
-    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+    const gameId = uuidv4().substring(0, 8); // Generate 8-char random ID
+     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() ||
+                req.headers['fly-client-ip']?.split(',')[0].trim() || // For Fly.io
+                req.socket.remoteAddress;
     if (!ip) {
-        console.error("[Game Create Error] Could not determine client IP for game creation attempt.");
+        console.error("[Game Create Error] Could not determine client IP for game creation.");
         return res.status(400).json({ error: 'Could not determine client IP.' });
     }
     const createdAt = new Date().toISOString();
     console.log(`[Game Create] Attempting game ${gameId} for IP: ${ip}`);
+
     db.run('INSERT INTO games (game_id, player1_ip, created_at, status) VALUES (?, ?, ?, ?)',
-        [gameId, ip, createdAt, 'waiting'], function(err) {
+        [gameId, ip, createdAt, 'waiting'], function(err) { // Use function() if you need this.lastID
             if (err) {
                 console.error('[DB Error] Game creation error:', err.message);
                 return res.status(500).json({ error: 'Failed to create game room.' });
             }
             console.log(`[Game Create] Success: Game ${gameId} created.`);
+            // Update the user's record to link them to this game
             db.run('UPDATE users SET game_id = ? WHERE ip = ?', [gameId, ip], (userUpdateErr) => {
                 if (userUpdateErr) console.error(`[DB Error] Failed to link game ${gameId} to user IP ${ip}:`, userUpdateErr.message);
             });
-            res.status(201).json({ gameId, link: `${req.protocol}://${req.get('host')}/game/${gameId}` });
+            // Return the game ID and the full link to join
+            // Construct host carefully, consider proxy headers if applicable
+            const host = req.get('host'); // e.g., 'localhost:3000' or 'yourdomain.com'
+            const protocol = req.protocol; // 'http' or 'https'
+            const link = `${protocol}://${host}/game/${gameId}`;
+            res.status(201).json({ gameId, link });
         });
 });
 
+// --- HTML Serving Routes ---
+
 // Route to join/view a specific game
-// This should come AFTER specific API routes and potentially AFTER the root '/' route
-app.get('/game/:id', (req, res, next) => { // Added next
+// This needs to come AFTER API routes BUT BEFORE the final catch-all handlers
+// It relies on the static middleware to serve assets referenced within index.html
+app.get('/game/:id', (req, res, next) => {
     const gameId = req.params.id;
 
-    // Prevent static filenames from being treated as game IDs
-    // Using regex for 8 hex characters
+    // Strict validation for 8-character hexadecimal game ID
     if (!/^[a-f0-9]{8}$/i.test(gameId)) {
-         console.log(`[Game Route] Path parameter "${gameId}" rejected as invalid game ID format. Passing through.`);
-         return next(); // Pass control to the next middleware/handler (e.g., 404 handler)
+         console.log(`[Game Route] Path parameter "${gameId}" is not a valid game ID format. Passing to next handler.`);
+         // Let it fall through to the 404 handler if not caught by static or root '/'
+         return next();
     }
 
     // Validate the game ID exists in the database before serving the page
@@ -172,73 +214,80 @@ app.get('/game/:id', (req, res, next) => { // Added next
         }
         if (!row) {
             console.log(`[Game Join] Attempted to join non-existent game: ${gameId}`);
-            return res.status(404).send(`Game with ID '${gameId}' not found. <a href="/">Create a new game?</a>`);
+            // Provide a slightly more user-friendly 404 page
+            return res.status(404).send(`<!DOCTYPE html><html><head><title>Game Not Found</title><style>body{font-family:sans-serif; padding: 20px; text-align: center;}</style></head><body><h2>Game Not Found</h2><p>The game with ID <strong>${gameId}</strong> does not exist or may have expired.</p><p><a href="/">Create or join another game?</a></p></body></html>`);
         }
-        // Game exists, serve the main HTML file
-        // Let express.static handle serving assets linked within index.html
-        res.sendFile(path.join(__dirname, '../public/index.html'));
+        // Game exists, serve the main HTML file (assets are handled by static middleware)
+        console.log(`[Game Join] Serving index.html for valid game ID: ${gameId}`);
+        res.sendFile(path.join(publicDirectoryPath, 'index.html')); // Use absolute path
     });
 });
 
 // Root route: Serve the main game page
-// Placing this *after* API routes and potentially after static (though static order matters most)
-// but *before* the final 404 handler.
+// Needs to be placed carefully - after specific API/game routes, before 404
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../public/index.html'));
+    console.log("[Root Route] Serving index.html for /");
+    res.sendFile(path.join(publicDirectoryPath, 'index.html')); // Use absolute path
 });
 
 
-// --- WebSocket Server Setup --- (Keep this section as is)
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-const games = new Map();
-// ... (wss.on('connection', handlePlayerJoin, broadcast functions remain unchanged) ...
-// Copy the full WebSocket section from your previous correct version here
+// --- WebSocket Server Setup ---
+const server = http.createServer(app); // Create HTTP server from Express app
+const wss = new WebSocket.Server({ server }); // Attach WebSocket server
+const games = new Map(); // In-memory store for active game states { gameId -> { players: [ws1, ws2], choices: Map<ws, choice> } }
+
 wss.on('connection', (ws, req) => {
     // Extract gameId from the connection URL, e.g., /ws/abcdef12
-    const urlParts = req.url?.split('/'); // Use optional chaining
-    const gameId = urlParts && urlParts.length === 3 && urlParts[1] === 'ws' ? urlParts[2] : null;
+    const urlParts = req.url?.split('/'); // Use optional chaining for safety
+    // Path should be /ws/<gameId>
+    const gameId = urlParts && urlParts.length === 3 && urlParts[1] === 'ws' && /^[a-f0-9]{8}$/i.test(urlParts[2])
+                   ? urlParts[2]
+                   : null;
 
     if (!gameId) {
-        console.log('[WS] Connection attempt without valid game ID in URL.');
-        ws.send(JSON.stringify({ error: 'Invalid game link format.' }));
-        ws.close(1008, "Missing or invalid game ID"); // Policy Violation
+        console.log(`[WS] Connection attempt with invalid URL path: ${req.url}. Expected /ws/<8-hex-gameId>`);
+        ws.send(JSON.stringify({ error: 'Invalid connection path format.' }));
+        ws.close(1008, "Invalid connection path"); // Policy Violation
         return;
     }
 
     console.log(`[WS] Connection attempt for game: ${gameId}`);
 
-    // Verify game exists in DB before creating in-memory state
+    // Verify game exists in DB before proceeding
     db.get('SELECT game_id, status FROM games WHERE game_id = ?', [gameId], (err, row) => {
         if (err || !row) {
-             console.log(`[WS] Rejecting connection: Game ${gameId} not found in DB or DB error.`);
+             const errorMsg = err ? `DB error checking game ${gameId}` : `Game ${gameId} not found in DB`;
+             console.log(`[WS] Rejecting connection: ${errorMsg}`);
              ws.send(JSON.stringify({ error: 'Game not found or has expired.' }));
-             ws.close(1011, "Game not found"); // Internal Error / Not Found
+             ws.close(1011, "Game not found");
              return;
          }
-         // Optional: Check if game status prevents joining (e.g., 'finished')
-         // if (row.status === 'finished' || row.status === 'abandoned') { ... reject ... }
+         // Optional: Check game status (e.g., don't allow joining 'finished' games)
+         if (row.status === 'finished' || row.status === 'abandoned') {
+             console.log(`[WS] Rejecting connection: Game ${gameId} is already ${row.status}.`);
+             ws.send(JSON.stringify({ error: `This game has already ${row.status}.` }));
+             ws.close(1008, "Game ended");
+             return;
+         }
 
-
-        // Find or initialize the game state in the map
+        // Find or initialize the game state in the in-memory map
         let gameState = games.get(gameId);
         if (!gameState) {
             console.log(`[WS] Initializing in-memory state for game: ${gameId}`);
-            gameState = { players: [], choices: new Map() }; // Use Map for choices
+            gameState = { players: [], choices: new Map() }; // Use Map for choices {ws -> choice}
             games.set(gameId, gameState);
         }
 
         // Now handle the player joining this verified game state
-        handlePlayerJoin(ws, gameState, gameId, row.status);
+        handlePlayerJoin(ws, gameState, gameId, row.status); // Pass DB status
      });
-}); // <<< --- Correct closing bracket for wss.on('connection',...)
+}); // End wss.on('connection')
 
 function handlePlayerJoin(ws, gameState, gameId, dbStatus) {
     // Check if game is already full
     if (gameState.players.length >= 2) {
-        // Corrected template literal for logging:
-        console.log(`[WS] Rejecting connection: Game ${gameId} is full.`);
-        ws.send(JSON.stringify({ error: 'This game session is already full (2 players max).' }));
+        console.log(`[WS] Rejecting connection: Game ${gameId} is full (in-memory check).`);
+        ws.send(JSON.stringify({ error: 'This game session is already full.' }));
         ws.close(1008, "Game full");
         return;
     }
@@ -247,170 +296,218 @@ function handlePlayerJoin(ws, gameState, gameId, dbStatus) {
     gameState.players.push(ws);
     console.log(`[WS] Player joined game ${gameId}. Total players: ${gameState.players.length}`);
 
-    // Add reference to gameState and gameId on the websocket object for easier cleanup
+    // Store gameId and gameState reference directly on the WebSocket object for easy access later
     ws.gameId = gameId;
-    ws.gameState = gameState; // Direct reference to the state object
+    ws.gameState = gameState;
 
-    // Notify player about current status and wait if necessary
+    // --- Actions based on player count ---
     if (gameState.players.length === 1) {
+        // First player joined
         ws.send(JSON.stringify({ message: "Waiting for opponent to join...", playerCount: 1 }));
-        // Update DB status if needed (e.g., if it was 'abandoned' previously)
+        // Ensure DB status is 'waiting'
         if (dbStatus !== 'waiting') {
-            db.run('UPDATE games SET status = ? WHERE game_id = ?', ['waiting', gameId]);
+            db.run('UPDATE games SET status = ? WHERE game_id = ?', ['waiting', gameId], (err) => {
+                 if(err) console.error(`[DB Error] Failed to set game ${gameId} to waiting on first player join:`, err.message);
+            });
         }
     } else if (gameState.players.length === 2) {
-         // Notify both players
-         broadcast(gameState, { message: "Opponent connected! Make your choice.", playerCount: 2 });
-         // Update game status in DB to 'active'
-         // Corrected query to get the IP of the second player based on join time (assuming latest user entry for this game is P2)
+        // Second player joined - Game starts!
+        console.log(`[WS] Game ${gameId} is now active with 2 players.`);
+        broadcast(gameState, { message: "Opponent connected! Make your choice.", playerCount: 2 });
+        // Update game status in DB to 'active' and try to set player2_ip
+        // Getting player 2 IP is tricky without authentication, relying on DB user tracking
          db.run(`
              UPDATE games
              SET status = 'active',
-                 player2_ip = (SELECT ip FROM users WHERE rowid = (SELECT MAX(rowid) FROM users WHERE game_id = ?))
-             WHERE game_id = ?
-         `, [gameId, gameId],
+                 player2_ip = (
+                     SELECT ip FROM users
+                     WHERE game_id = ?
+                       AND ip != (SELECT player1_ip FROM games WHERE game_id = ?)
+                     ORDER BY visit_time DESC
+                     LIMIT 1
+                 )
+             WHERE game_id = ? AND status != 'active'
+         `, [gameId, gameId, gameId], // Pass gameId three times for the subqueries/conditions
          (err) => {
-             // Corrected template literal for logging:
              if (err) console.error(`[DB Error] Failed to set game ${gameId} to active or assign player2_ip: ${err.message}`);
+             else console.log(`[DB] Game ${gameId} status set to active.`);
          });
     }
 
-
-    // --- WebSocket Message Handling ---
+    // --- WebSocket Message Handling (Choices) ---
     ws.on('message', (message) => {
-        // Ensure the game state still exists (might have been cleaned up)
-        const currentGameState = ws.gameState; // Use reference stored on ws
+        // Use stored references
+        const currentGameState = ws.gameState;
+        const currentGameId = ws.gameId;
+
         if (!currentGameState) {
-             console.warn(`[WS] Received message for non-existent game state (gameId: ${ws.gameId}). Ignoring.`);
+             console.warn(`[WS] Received message for non-existent/cleaned-up game state (gameId: ${currentGameId}). Ignoring.`);
+             // Optionally send an error back to the client if the ws is still open
+             if (ws.readyState === WebSocket.OPEN) {
+                 ws.send(JSON.stringify({ error: "Game session ended or not found." }));
+                 ws.close(1011, "Game state missing");
+             }
              return;
         }
-        // Ensure game has 2 players before accepting choices
         if (currentGameState.players.length < 2) {
-            ws.send(JSON.stringify({ message: "Waiting for opponent..." }));
-            return;
+            ws.send(JSON.stringify({ message: "Still waiting for opponent..." }));
+            return; // Don't process choices until 2 players are present
         }
 
         let data;
         try {
-            // Handle binary data (Buffer) by converting to string
             const messageString = message instanceof Buffer ? message.toString() : message;
             data = JSON.parse(messageString);
-
-            // Basic validation
             if (typeof data !== 'object' || data === null || !['rock', 'paper', 'scissors'].includes(data.choice)) {
-                 console.warn(`[WS] Invalid message received for game ${ws.gameId}:`, messageString);
-                 ws.send(JSON.stringify({ error: 'Invalid message format or choice.' }));
-                 return;
+                 throw new Error('Invalid message format or choice.');
              }
         } catch (e) {
-            console.warn(`[WS] Non-JSON or invalid message received for game ${ws.gameId}:`, message, e);
-            ws.send(JSON.stringify({ error: 'Invalid message format.' }));
+            console.warn(`[WS] Invalid message received for game ${currentGameId}:`, message, e.message);
+            ws.send(JSON.stringify({ error: `Invalid message: ${e.message}` }));
             return;
         }
 
-        // Check if player already made a choice for this round (using Map.has)
+        // Check if player already chose this round
         if (currentGameState.choices.has(ws)) {
-             console.log(`[WS] Player in game ${ws.gameId} tried to choose again.`);
-             ws.send(JSON.stringify({ message: "You already chose for this round. Waiting..." }));
+             console.log(`[WS] Player in game ${currentGameId} tried to choose again.`);
+             ws.send(JSON.stringify({ message: "You already chose. Waiting for opponent..." }));
              return;
         }
 
-        console.log(`[WS] Received choice '${data.choice}' from player in game ${ws.gameId}`);
+        console.log(`[WS] Received choice '${data.choice}' from player in game ${currentGameId}`);
+        currentGameState.choices.set(ws, data.choice); // Store choice using ws object as key
+        ws.send(JSON.stringify({ message: "Choice received. Waiting..." }));
 
-        // Store the choice associated with the player's WebSocket connection
-        currentGameState.choices.set(ws, data.choice);
-        ws.send(JSON.stringify({ message: "Choice received. Waiting for opponent..." }));
+        // Notify the opponent when a player makes their first move
+        if (!currentGameState.choices.has(ws)) {
+            console.log(`[WS] Player in game ${currentGameId} made their first move.`);
+            const opponent = currentGameState.players.find(player => player !== ws);
+            if (opponent && opponent.readyState === WebSocket.OPEN) {
+                opponent.send(JSON.stringify({ message: "Your opponent has made their first move!" }));
+            }
+        }
 
-        // Check if both players have made their choices (using Map.size)
+        // --- Check if round is complete ---
         if (currentGameState.choices.size === 2) {
-            console.log(`[WS] Both players chose in game ${ws.gameId}. Determining result.`);
+            console.log(`[WS] Both players chose in game ${currentGameId}. Determining result.`);
             const choicesArray = Array.from(currentGameState.choices.entries()); // [[ws1, choice1], [ws2, choice2]]
 
-            const p1ws = choicesArray[0][0];
-            const p1choice = choicesArray[0][1];
-            const p2ws = choicesArray[1][0];
-            const p2choice = choicesArray[1][1];
+            // Ensure both player websockets are still valid before sending
+            if (choicesArray.length === 2 && choicesArray[0][0] && choicesArray[1][0]) {
+                const [p1ws, p1choice] = choicesArray[0];
+                const [p2ws, p2choice] = choicesArray[1];
 
-            // Send results to each player (their choice + opponent's choice)
-             p1ws.send(JSON.stringify({ yourChoice: p1choice, opponentChoice: p2choice }));
-             p2ws.send(JSON.stringify({ yourChoice: p2choice, opponentChoice: p1choice }));
+                // Send specific results to each player
+                 if (p1ws.readyState === WebSocket.OPEN) {
+                     p1ws.send(JSON.stringify({ yourChoice: p1choice, opponentChoice: p2choice }));
+                 } else { console.log(`[WS] Player 1 in game ${currentGameId} disconnected before result.`); }
+                 if (p2ws.readyState === WebSocket.OPEN) {
+                     p2ws.send(JSON.stringify({ yourChoice: p2choice, opponentChoice: p1choice }));
+                 } else { console.log(`[WS] Player 2 in game ${currentGameId} disconnected before result.`); }
 
-            // Clear choices map for the next round
-            currentGameState.choices.clear();
-            console.log(`[WS] Choices cleared for game ${ws.gameId}, ready for next round.`);
-             broadcast(currentGameState, { message: "Round finished! Make your next choice." });
+                // Clear choices map for the next round
+                currentGameState.choices.clear();
+                console.log(`[WS] Choices cleared for game ${currentGameId}.`);
+                 // Optional: Slight delay before prompting for next choice might feel better UI-wise
+                 setTimeout(() => {
+                    // Check state again before broadcasting, in case someone disconnected during timeout
+                    if (currentGameState.players.length === 2) {
+                        broadcast(currentGameState, { message: "Make your next choice!" });
+                    }
+                 }, 100); // Short delay
+            } else {
+                 console.warn(`[WS] Round completion check failed for game ${currentGameId} - player(s) might have disconnected.`);
+                 // Clear choices anyway
+                 currentGameState.choices.clear();
+                 // The 'close' handler should manage notifying remaining player
+            }
         }
-    }); // <<< --- Correct closing bracket for ws.on('message',...)
+    }); // End ws.on('message')
 
     // --- WebSocket Close Handling ---
     ws.on('close', (code, reason) => {
-        const closedGameId = ws.gameId; // Get gameId before potentially losing ws reference
+        // Use stored references
+        const closedGameId = ws.gameId;
         const closedGameState = ws.gameState;
-        const reasonString = reason instanceof Buffer ? reason.toString() : reason;
-        console.log(`[WS] Player disconnected from game ${closedGameId}. Code: ${code}, Reason: ${reasonString || 'N/A'}`);
+        const reasonString = reason instanceof Buffer ? reason.toString() : (reason || 'N/A'); // Handle empty reason
+        console.log(`[WS] Player disconnected from game ${closedGameId}. Code: ${code}, Reason: ${reasonString}`);
 
-        // Remove player from the active game state if it still exists
-        if (closedGameState) {
-             closedGameState.players = closedGameState.players.filter(player => player !== ws);
-             console.log(`[WS] Remaining players in game ${closedGameId}: ${closedGameState.players.length}`);
-
-            // If the game is now empty or has one player left
-            if (closedGameState.players.length < 2) {
-                // Clear any pending choices if someone leaves mid-round
-                closedGameState.choices.clear();
-
-                if (closedGameState.players.length === 0) {
-                    console.log(`[WS] Game ${closedGameId} is empty. Removing from memory and DB.`);
-                    games.delete(closedGameId);
-                    // Optional: Mark as 'abandoned' or delete from DB
-                    db.run('UPDATE games SET status = ? WHERE game_id = ?', ['abandoned', closedGameId], (err) => {
-                    // db.run('DELETE FROM games WHERE game_id = ?', [closedGameId], (err) => { // Alternative: Delete
-                        if (err) console.error(`[DB Error] Failed to update/delete game ${closedGameId} on empty:`, err.message);
-                    });
-                } else {
-                    // Notify the remaining player
-                     const remainingPlayer = closedGameState.players[0];
-                     if (remainingPlayer && remainingPlayer.readyState === WebSocket.OPEN) {
-                          remainingPlayer.send(JSON.stringify({
-                             playerCount: 1,
-                             message: "Your opponent has disconnected. Waiting for a new player..." // Or end game
-                          }));
-                     }
-                     // Update game status in DB back to 'waiting'
-                     db.run('UPDATE games SET status = ?, player2_ip = NULL WHERE game_id = ?', ['waiting', closedGameId], (err) => {
-                          if (err) console.error(`[DB Error] Failed to set game ${closedGameId} to waiting:`, err.message);
-                     });
-                }
-            }
-        } else {
+        if (!closedGameState) {
              console.log(`[WS] Game state for ${closedGameId} not found during close event (already cleaned up?).`);
+             return; // Nothing more to do if state is already gone
         }
-    }); // <<< --- Correct closing bracket for ws.on('close',...)
 
+        // Remove player from the in-memory state using filter
+        const playerIndex = closedGameState.players.indexOf(ws);
+        if (playerIndex > -1) {
+            closedGameState.players.splice(playerIndex, 1);
+            console.log(`[WS] Player removed from game ${closedGameId}. Remaining: ${closedGameState.players.length}`);
+        } else {
+             console.warn(`[WS] Disconnecting player not found in game state for ${closedGameId}. State may be inconsistent.`);
+        }
+        // Also remove their choice if they disconnect mid-round
+        closedGameState.choices.delete(ws);
+
+
+        // --- Actions based on remaining players ---
+        if (closedGameState.players.length === 0) {
+            // Game is now empty
+            console.log(`[WS] Game ${closedGameId} is empty. Removing from memory and updating DB.`);
+            games.delete(closedGameId); // Remove from in-memory map
+            db.run('UPDATE games SET status = ? WHERE game_id = ?', ['abandoned', closedGameId], (err) => {
+                if (err) console.error(`[DB Error] Failed to update game ${closedGameId} to abandoned:`, err.message);
+            });
+        } else if (closedGameState.players.length === 1) {
+            // One player remaining
+            const remainingPlayer = closedGameState.players[0];
+            // Clear any choices from the round that was interrupted (already done above)
+            // closedGameState.choices.clear();
+            // Notify remaining player
+            if (remainingPlayer.readyState === WebSocket.OPEN) {
+                 remainingPlayer.send(JSON.stringify({
+                    playerCount: 1,
+                    message: "Your opponent has disconnected. Waiting..."
+                 }));
+            }
+            // Update DB status back to 'waiting' and clear player 2 IP
+            db.run('UPDATE games SET status = ?, player2_ip = NULL WHERE game_id = ?', ['waiting', closedGameId], (err) => {
+                 if (err) console.error(`[DB Error] Failed to set game ${closedGameId} back to waiting:`, err.message);
+                 else console.log(`[DB] Game ${closedGameId} status set back to waiting.`);
+            });
+        }
+        // If 2 players remain (shouldn't happen on 'close'), do nothing extra here
+    }); // End ws.on('close')
+
+     // --- WebSocket Error Handling ---
      ws.on('error', (error) => {
-         console.error(`[WS] WebSocket error for player in game ${ws.gameId}:`, error);
-         // The 'close' event will usually follow, handling cleanup there.
-         // Consider closing the connection explicitly if it's still open after an error
-         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-             ws.terminate(); // Force close
+         const errorGameId = ws.gameId || 'unknown';
+         console.error(`[WS] WebSocket error for player in game ${errorGameId}:`, error);
+         // 'close' event usually follows an error, cleanup is handled there.
+         // Force close if necessary to ensure cleanup happens
+         if (ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+             console.log(`[WS] Terminating WebSocket due to error for game ${errorGameId}.`);
+             ws.terminate();
          }
      });
-} // <<< --- Correct closing bracket for handlePlayerJoin function
 
-// Helper function to broadcast messages to all players in a game
+} // End handlePlayerJoin function
+
+// Helper function to broadcast messages to all players in a specific game state
 function broadcast(gameState, messageObject) {
     if (!gameState || !gameState.players) return;
     const messageString = JSON.stringify(messageObject);
-    // Find gameId for logging (optional, assumes players have ws.gameId)
-    // const gameIdForLog = gameState.players[0]?.gameId || 'unknown';
-    // console.log(`[WS] Broadcasting to game ${gameIdForLog}: ${messageString}`);
+    const gameIdForLog = gameState.players[0]?.gameId || 'unknown'; // Get gameId if possible for logging
+
+    // console.log(`[WS] Broadcasting to game ${gameIdForLog}: ${messageString}`); // Verbose log
     gameState.players.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
+        // Check if the client is still stored and connection is open
+        if (client && client.readyState === WebSocket.OPEN) {
             try {
                 client.send(messageString);
             } catch (sendError) {
-                // Corrected template literal for logging:
-                console.error(`[WS] Error sending message to client in game ${client.gameId}:`, sendError);
+                console.error(`[WS] Error sending message to client in game ${client.gameId || gameIdForLog}:`, sendError);
+                // Consider terminating client here if send fails repeatedly,
+                // but 'close'/'error' events should ideally handle cleanup.
             }
         }
     });
@@ -418,53 +515,88 @@ function broadcast(gameState, messageObject) {
 
 
 // --- Catch-all 404 Handler ---
-// This should be the VERY LAST non-error handling middleware/route
+// This MUST be the last route definition before error handlers
 app.use((req, res, next) => {
-  console.log(`[404 Handler] Route not found: ${req.method} ${req.originalUrl}`);
-  res.status(404).send("Sorry, can't find that!");
+  // Check if the request was likely for a static file that wasn't found
+  // This helps differentiate API/route typos from missing assets
+  if (req.path.includes('.')) { // Basic check for file extension
+      console.log(`[404 Handler] Static asset not found: ${req.method} ${req.originalUrl}`);
+  } else {
+      console.log(`[404 Handler] Route/Endpoint not found: ${req.method} ${req.originalUrl}`);
+  }
+  res.status(404).send(`Sorry, can't find ${req.originalUrl}`);
 });
 
-// --- Error Handling Middleware ---
-// Optional, but good practice
+// --- Generic Error Handling Middleware ---
+// Must have 4 arguments (err, req, res, next) to be recognized as error handler
 app.use((err, req, res, next) => {
-  console.error("[Unhandled Error]", err.stack);
-  res.status(500).send('Something broke!');
+  console.error("[Server Error - Unhandled]", err.stack || err);
+  // Avoid sending stack trace in production environment
+  const status = err.status || 500;
+  const message = process.env.NODE_ENV === 'production' ? 'Something went wrong on the server!' : err.message || 'Internal Server Error';
+  res.status(status).send(message);
 });
 
 
-// --- Server Start and Shutdown ---
+// --- Server Start and Graceful Shutdown ---
 server.listen(port, () => {
     console.log(`[Server] HTTP and WebSocket server running on http://localhost:${port}`);
 });
 
-// Graceful shutdown: Close DB connection when server stops
-process.on('SIGINT', () => {
-    console.log('[Server] SIGINT received. Shutting down gracefully...');
-    // Close WebSocket connections first
+// Graceful shutdown logic
+function shutdown(signal) {
+    console.log(`[Server] ${signal} signal received. Shutting down gracefully...`);
+    let shutdownComplete = false; // Flag to prevent multiple exits
+
+    // Force exit after a timeout
+    const shutdownTimeout = setTimeout(() => {
+        if (!shutdownComplete) {
+            console.error('[Server] Graceful shutdown timed out. Forcing exit.');
+            process.exit(1);
+        }
+    }, 10000); // 10 second overall timeout
+
+    // 1. Close WebSocket connections
+    const totalConnections = wss.clients.size;
+    console.log(`[WS] Closing ${totalConnections} WebSocket connections...`);
     wss.clients.forEach(client => {
-        client.close(1012, "Server shutting down"); // Service Restart code
+        if (client.readyState === WebSocket.OPEN) {
+            client.close(1012, "Server is restarting"); // 1012 = Service Restart
+        }
     });
-    wss.close(() => {
-        console.log('[WS] WebSocket server closed.');
-        // Close HTTP server after WS server
-        server.close(() => {
-            console.log('[Server] HTTP server closed.');
-            // Close DB connection last
-            db.close((err) => {
-                if (err) {
-                    console.error('[DB Error] Error closing database connection:', err.message);
-                    process.exit(1); // Exit with error code if DB fails to close
-                }
-                console.log('[DB] Database connection closed.');
-                process.exit(0); // Exit successfully
+
+    // Wait briefly for WS clients to close before closing servers
+    // Alternatively, track closed connections if precise timing needed
+    setTimeout(() => {
+        // 2. Close the WebSocket server itself
+        wss.close((err) => {
+            if (err) { console.error('[WS] Error closing WebSocket server:', err); }
+            else { console.log('[WS] WebSocket server closed.'); }
+
+            // 3. Close the HTTP server (stops accepting new connections)
+            server.close((err) => {
+                if (err) { console.error('[Server] Error closing HTTP server:', err); }
+                else { console.log('[Server] HTTP server closed.'); }
+
+                // 4. Close the Database connection (LAST)
+                console.log('[DB] Closing database connection...');
+                db.close((err) => {
+                    shutdownComplete = true; // Mark shutdown as complete
+                    clearTimeout(shutdownTimeout); // Clear the force exit timeout
+                    if (err) {
+                        console.error('[DB Error] Error closing database:', err.message);
+                        process.exitCode = 1; // Set exit code to indicate error
+                    } else {
+                        console.log('[DB] Database connection closed.');
+                        process.exitCode = 0; // Set exit code to indicate success
+                    }
+                    console.log('[Server] Shutdown complete.');
+                    // Let the process exit naturally now based on process.exitCode
+                });
             });
         });
-    });
+    }, 1500); // Wait 1.5 seconds for WS clients to hopefully disconnect
+}
 
-
-    // Force shutdown after a timeout if graceful shutdown fails
-    setTimeout(() => {
-        console.error('[Server] Graceful shutdown timed out. Forcing exit.');
-        process.exit(1);
-    }, 5000); // 5 second timeout
-});
+process.on('SIGINT', () => shutdown('SIGINT')); // Ctrl+C
+process.on('SIGTERM', () => shutdown('SIGTERM')); // Termination signal from OS/hosting

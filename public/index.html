@@ -6,17 +6,14 @@
     <meta name="description" content="Play Rock, Paper, Scissors online with friends or against the computer.">
     <meta name="keywords" content="rock paper scissors, online game, multiplayer game, rps">
     <title>Rock, Paper, Scissors - Play Online</title>
-    <!-- CORRECTED PATHS -->
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="settings.css">
-    <link rel="icon" href="rps.jpg" type="image/x-icon">
+    <!-- Paths are relative to index.html inside the 'public' folder -->
+    <link rel="stylesheet" href="/style.css">      <!-- Main game styles -->
+    <link rel="stylesheet" href="/settings.css">  <!-- Settings panel styles -->
+    <link rel="icon" href="/rps.jpg" type="image/jpeg"> <!-- Ensure type matches your image -->
 </head>
 <body>
-    <!-- CORRECTED PATH (Also consider renaming the MP3 file) -->
-    <audio id="background-sound" src="Kendrick Lamar - Not Like Us (INSTRUMENTAL) Drake Diss.mp3" loop></audio>
-    <!-- Optional Game Sounds -->
-    <!-- <audio id="choose-sound" src="/sounds/choose.wav"></audio> -->
-    <!-- <audio id="win-sound" src="/sounds/win.wav"></audio> -->
+    <!-- Path is relative to index.html -->
+    <audio id="background-sound" src="/Kendrick Lamar - Not Like Us (INSTRUMENTAL) Drake Diss.mp3" loop></audio>
 
     <!-- Settings Panel -->
     <div class="settings-panel" id="settings-panel">
@@ -24,7 +21,7 @@
         <div class="settings-section">
             <h4>Sound</h4>
             <label><input type="checkbox" id="sound-toggle" checked> Music On/Off</label>
-            <label>Volume: <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.5"></label> <!-- Default volume lowered -->
+            <label>Volume: <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.5"></label>
         </div>
         <div class="settings-section">
             <h4>Theme</h4>
@@ -86,13 +83,14 @@
     </div>
 
     <!-- Scripts: Load theme logic first, then game logic, then settings interaction -->
-    <!-- CORRECTED PATHS -->
-    <script src="theme.js"></script>
-    <script src="game.js"></script>
-    <script src="settings.js"></script>
+    <!-- Paths are relative to index.html -->
+    <script src="/theme.js"></script>
+    <script src="/game.js"></script>
+    <script src="/settings.js"></script>
+    <!-- Vercel Speed Insights Script (optional, remove if not deploying to Vercel) -->
     <script>
-        window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
-      </script>
-      <script defer src="/_vercel/speed-insights/script.js"></script>
+      window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+    </script>
+    <script defer src="/_vercel/speed-insights/script.js"></script>
 </body>
 </html>

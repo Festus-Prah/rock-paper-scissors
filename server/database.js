@@ -12,7 +12,7 @@ const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CR
         // Optionally exit the process if DB connection is critical
         process.exit(1);
     }
-    console.log('Successfully connected to SQLite database:', dbPath);
+    console.log('[DB] Successfully connected to SQLite database:', dbPath);
 });
 
 // Run table creation logic immediately after connection
@@ -20,15 +20,17 @@ db.serialize(() => {
     // Users table: Stores basic info, tracks last visit and associated game
     db.run(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ip TEXT UNIQUE NOT NULL,
-        username TEXT UNIQUE NOT NULL,
+        ip TEXT NOT NULL,
+        username TEXT NOT NULL,
         visit_time TEXT,
-        game_id TEXT
+        game_id TEXT,
+        UNIQUE(ip),    -- Ensure IP is unique
+        UNIQUE(username) -- Ensure username is unique
     )`, (err) => {
         if (err) {
-            console.error('Error creating users table:', err.message);
+            console.error('[DB Error] Error creating users table:', err.message);
         } else {
-            console.log('Users table verified/created.');
+             console.log('[DB] Users table verified/created.');
         }
     });
 
@@ -41,9 +43,9 @@ db.serialize(() => {
         status TEXT DEFAULT 'waiting' -- 'waiting', 'active', 'finished', 'abandoned'
     )`, (err) => {
         if (err) {
-            console.error('Error creating games table:', err.message);
+            console.error('[DB Error] Error creating games table:', err.message);
         } else {
-            console.log('Games table verified/created.');
+             console.log('[DB] Games table verified/created.');
         }
     });
 });

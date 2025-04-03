@@ -1,1 +1,20 @@
-node_modules/ 
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# SQLite Database file
+server/users.db
+server/users.db-journal
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Operating System files
+.DS_Store
+Thumbs.db

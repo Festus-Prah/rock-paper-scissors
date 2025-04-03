@@ -142,43 +142,49 @@ const themes = {
 
 /**
  * Applies the selected theme by setting CSS variables on the root element.
- * @param {string} themeName - The name of the theme to apply (key in the themes object).
+ * Ensures the theme exists, falling back to default.
+ * @param {string} themeName - The name of the theme to apply.
  */
-function applyTheme(themeName) {
-    const theme = themes[themeName] || themes.default;
+// Make applyTheme global so settings.js can call it
+window.applyTheme = function(themeName) {
+    // Ensure themeName is valid, fallback to 'default'
+    const validThemeName = themes[themeName] ? themeName : 'default';
+    const theme = themes[validThemeName];
     const root = document.documentElement; // Get the <html> element
 
-    console.log(`Applying theme: ${themeName}`);
+    // console.log(`Applying theme: ${validThemeName}`); // Use valid name in log
     // Loop through the theme properties and set CSS variables
     for (const property in theme) {
-        if (Object.hasOwnProperty.call(theme, property)) {
-            root.style.setProperty(property, theme[property]);
-            // console.log(`Set ${property} to ${theme[property]}`); // Debug logging
-        }
+        // No need for hasOwnProperty check if themes object structure is controlled
+        root.style.setProperty(property, theme[property]);
     }
 
     // Store the selected theme in localStorage
     try {
-        localStorage.setItem('selectedTheme', themeName);
+        localStorage.setItem('selectedTheme', validThemeName);
     } catch (e) {
         console.warn("Could not save theme to localStorage:", e);
     }
-}
+};
 
 // Apply the saved theme on initial load
 document.addEventListener('DOMContentLoaded', () => {
-    let savedTheme = null;
+    let savedTheme = 'default'; // Default theme
     try {
-         savedTheme = localStorage.getItem('selectedTheme');
+         const storedTheme = localStorage.getItem('selectedTheme');
+         // Use stored theme only if it's a valid key in our themes object
+         if (storedTheme && themes[storedTheme]) {
+             savedTheme = storedTheme;
+         }
     } catch (e) {
         console.warn("Could not read theme from localStorage:", e);
     }
 
     const themeSelect = document.getElementById('theme-select');
-    const themeToApply = (savedTheme && themes[savedTheme]) ? savedTheme : 'default';
-
     if (themeSelect) {
-        themeSelect.value = themeToApply; // Update dropdown to match applied theme
+        themeSelect.value = savedTheme; // Update dropdown to match applied theme
+    } else {
+        console.error("Theme select dropdown not found.");
     }
-    applyTheme(themeToApply); // Apply the determined theme
+    applyTheme(savedTheme); // Apply the determined theme
 });
