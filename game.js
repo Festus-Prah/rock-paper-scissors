@@ -1,6 +1,6 @@
 // ...existing code...
 function fetchUsername() {
-    fetch('/api/username') // Make sure this path is correct
+    fetch('/api/username') // Ensure correct relative path
         .then(response => {
             if (!response.ok) {
                 throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
